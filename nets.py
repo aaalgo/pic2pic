@@ -5,6 +5,7 @@ from __future__ import print_function
 import os
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
+from tensorflow.contrib.slim.nets import resnet_v1
 from tensorflow.python.ops import variable_scope
 
 def G (X, channels=1, scope=None, reuse=True):
@@ -61,3 +62,11 @@ def D (X, scope=None, reuse=True):
         net = slim.conv2d(net, 2, 1, 1, activation_fn=None)
     return net
 
+def resnet (X, scope=None, reuse=True):
+    print("USING RESNET")
+    net, _ = resnet_v1.resnet_v1_50(X,
+                            num_classes=2,
+                            global_pool = True,
+                            scope=scope,
+                            reuse=reuse)
+    return net

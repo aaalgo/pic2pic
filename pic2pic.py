@@ -16,8 +16,8 @@ flags = tf.app.flags
 FLAGS = flags.FLAGS
 flags.DEFINE_string('A', None, '')
 flags.DEFINE_string('B', None, '')
-flags.DEFINE_string('G', 'G', '')
-flags.DEFINE_string('D', 'D', '')
+flags.DEFINE_string('Gnet', 'G', '')
+flags.DEFINE_string('Dnet', 'resnet', '')
 flags.DEFINE_string('opt', 'adam', '')
 flags.DEFINE_float('eta', 0.1, '')
 flags.DEFINE_float('learning_rate', 0.02, 'Initial learning rate.')
@@ -54,9 +54,9 @@ def LossD (logits, l, name):
         labels = tf.ones(shape, tf.int32)
     xe = tf.nn.sparse_softmax_cross_entropy_with_logits(logits, labels)
     xe = tf.reduce_mean(xe)
-    return tf.identity(xe, name=name)
+    return tf.identity(xe, name=name) #, tf.identity(L,name=name+'H')
 
-def build_graph (A, B, optimizer, global_step):
+def build_graph (A, B, Gopt, Dopt, global_step):
 
     G = getattr(nets, FLAGS.G)  # generator generator
     D = getattr(nets, FLAGS.D)  # discriminator generator
@@ -87,9 +87,10 @@ def build_graph (A, B, optimizer, global_step):
     l4 = LossD(baL, 1, 'Gba')
     insure_pos_correlation = LossG(aB, A, 'insureAB') + LossG(bA, B, 'insureBA')
     loss = (l1 + l2) * (FLAGS.eta/2) + (l3 + l4)/2
-    loss = tf.cond(global_step < 1000,
-                    lambda: loss + insure_pos_correlation,
-                    lambda: loss)
+    if FLAGS.resume is None:
+        loss = tf.cond(global_step < 1000,
+                        lambda: loss + insure_pos_correlation,
+                        lambda: loss)
 
     loss = tf.identity(loss, name='G')
 
@@ -97,19 +98,20 @@ def build_graph (A, B, optimizer, global_step):
     phases.append(('generate',
                   optimizer.minimize(loss, global_step=global_step, var_list=var_list),
                   [loss, l1, l2, tf.identity((l3+l4)/2,name='Gxe')],  # metrics
-                  [bA, aB]))
+                  [bA, aB], []))
 
     l1 = LossD(a1, 1, 'Da1')
     l2 = LossD(baL, 0, 'Da0')
     l3 = LossD(b1, 1, 'Db1')
     l4 = LossD(abL, 0, 'Db0')
+    #acc = tf.identity((h1+h2+h3+h4)/4, name='acc')
     loss = tf.identity((l1 + l2 + l3 + l4)/4, name='Dxe')
 
     var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "D")
     phases.append(('discriminate',
-                  optimizer.minimize(loss, global_step=global_step, var_list=var_list),
+                  Dopt.minimize(loss, var_list=var_list),
                   [loss],
-                  []))
+                  [], []))
     vA = tf.saturate_cast(tf.concat(2, [A, abA, aB]), dtype=tf.uint8, name='vA')
     vB = tf.saturate_cast(tf.concat(2, [B, baB, bA]), dtype=tf.uint8, name='vB')
 
@@ -129,7 +131,7 @@ def main (_):
     A = tf.placeholder(tf.float32, shape=(None, None, None, FLAGS.channels), name="A")
     B = tf.placeholder(tf.float32, shape=(None, None, None, FLAGS.channels), name="B")
 
-    rate = FLAGS.learning_rate
+    rate = tf.constant(FLAGS.learning_rate)
     if FLAGS.opt == 'adam':
         rate /= 100
     global_step = tf.Variable(0, name='global_step', trainable=False)
@@ -144,10 +146,10 @@ def main (_):
         optimizer = tf.train.GradientDescentOptimizer(rate)
         pass
 
-    phases = build_graph(A, B, optimizer, global_step)
+    phases = build_graph(A, B, optimizer optimizer, global_step)
 
     metric_names = []
-    for _, _, metrics, _ in phases:
+    for _, _, metrics, _, _ in phases:
         metric_names.extend([x.name[:-2] for x in metrics])
 
     summaries = tf.constant(1)
@@ -161,6 +163,14 @@ def main (_):
 
     init = tf.global_variables_initializer()
     tf.get_default_graph().finalize()
+
+    graph = tf.get_default_graph()
+    graph.finalize()
+    graph_def = graph.as_graph_def()
+    for node in graph_def.node:
+        if node.name[0] == 'D':
+            #print(node.name)
+            pass
 
     picpac_config = dict(seed=2016,
                 shuffle=True,
@@ -203,10 +213,10 @@ def main (_):
                 b, _, _ = streamB.next()
                 forward_dict = {}
                 m_off = 0
-                for _, train, metrics, forward in phases:
+                for _, train, metrics, forward, show in phases:
                     feed_dict = {A: a, B: b}
                     feed_dict.update(forward_dict)
-                    _, m, f= sess.run([train, metrics, forward], feed_dict=feed_dict)
+                    _, m, f, ss= sess.run([train, metrics, forward, show], feed_dict=feed_dict)
                     forward_dict = dict(zip(forward, f))
                     m_off_n = m_off + len(metrics)
                     avg[m_off:m_off_n] += m

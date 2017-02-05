@@ -54,6 +54,8 @@ def D (X, scope=None, reuse=True):
         net = slim.max_pool2d(net, 2, 2)
         net = slim.batch_norm(slim.conv2d(net, 256, 3, 1))
         net = slim.max_pool2d(net, 2, 2)
+        net = slim.batch_norm(slim.conv2d(net, 256, 3, 1))
+        net = slim.max_pool2d(net, 2, 1)
         net = slim.batch_norm(slim.conv2d(net, 64, 3, 1))
         net = slim.batch_norm(slim.conv2d(net, 32, 3, 1))
         net = slim.conv2d(net, 2, 1, 1, activation_fn=None)

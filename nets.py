@@ -14,6 +14,7 @@ def G (X, channels=1, scope=None, reuse=True):
     with variable_scope.variable_scope(scope, None, [net], reuse=reuse):
         with slim.arg_scope([slim.conv2d, slim.conv2d_transpose, slim.max_pool2d],
                                 padding='SAME'):
+            stack.append(net)
             net = slim.batch_norm(slim.conv2d(net, 16, 5, 2))
             stack.append(net)       # 1/2
             net = slim.batch_norm(slim.conv2d(net, 32, 3, 1))
@@ -36,7 +37,9 @@ def G (X, channels=1, scope=None, reuse=True):
             net = slim.batch_norm(slim.conv2d_transpose(net, 32, 3, 2))
             net = tf.concat(3, [net, stack.pop()])
             net = slim.batch_norm(slim.conv2d_transpose(net, 16, 3, 2))
-            net = slim.conv2d(net, channels, 5, 1, activation_fn=None) 
+            net = tf.concat(3, [net, stack.pop()])
+            net = slim.batch_norm(slim.conv2d(net, 8, 5, 1)) 
+            net = slim.conv2d(net, channels, 3, 1, activation_fn=None) 
     return tf.identity(net)
 
 def D (X, scope=None, reuse=True):
@@ -51,6 +54,6 @@ def D (X, scope=None, reuse=True):
         net = slim.max_pool2d(net, 2, 2)
         net = slim.batch_norm(slim.conv2d(net, 16, 3, 1))
         net = slim.batch_norm(slim.conv2d(net, 16, 3, 1))
-        net = slim.batch_norm(slim.conv2d(net, 2, 3, 1))
+        net = slim.conv2d(net, 2, 3, 1, activation_fn=None)
     return net
 

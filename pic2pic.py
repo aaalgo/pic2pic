@@ -19,7 +19,7 @@ flags.DEFINE_string('B', None, '')
 flags.DEFINE_string('G', 'G', '')
 flags.DEFINE_string('D', 'D', '')
 flags.DEFINE_string('opt', 'adam', '')
-flags.DEFINE_float('eta', 0.02, '')
+flags.DEFINE_float('eta', 0.01, '')
 flags.DEFINE_float('learning_rate', 0.01, 'Initial learning rate.')
 flags.DEFINE_bool('decay', True, '')
 flags.DEFINE_float('decay_rate', 0.9, '')
@@ -84,24 +84,29 @@ def build_graph (A, B, optimizer, global_step):
     loss = (l1 + l2) * FLAGS.eta + l3 + l4
 
     var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "G")
+    for x in var_list:
+        print("G: ", x.name)
     phases.append(('generate',
                   optimizer.minimize(loss, global_step=global_step, var_list=var_list),
                   [l1, l2, l3, l4],  # metrics
                   [bA, aB]))
 
     l1 = LossD(a1, 1, 'Da1')
-    l2 = LossD(bA, 0, 'Da0')
+    l2 = LossD(baL, 0, 'Da0')
     l3 = LossD(b1, 1, 'Db1')
-    l4 = LossD(aB, 0, 'Db0')
+    l4 = LossD(abL, 0, 'Db0')
     loss = l1 + l2 + l3 + l4
 
     var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "D")
+    for x in var_list:
+        print("D: ", x.name)
     phases.append(('discriminate',
                   optimizer.minimize(loss, global_step=global_step, var_list=var_list),
                   [l1, l2, l3, l4],
                   []))
-    vA = tf.concat(2, [A, abA, aB])
-    vB = tf.concat(2, [B, baB, bA])
+    vA = tf.saturate_cast(tf.concat(2, [A, abA, aB]), dtype=tf.uint8)
+    vB = tf.saturate_cast(tf.concat(2, [B, baB, bA]), dtype=tf.uint8)
+
     tf.summary.image('A', vA)
     tf.summary.image('B', vB)
     return phases
@@ -206,11 +211,12 @@ def main (_):
             avg /= FLAGS.epoch_steps
             stop_time = time.time()
             txt = ', '.join(['%s=%.4f' % (a, b) for a, b in zip(metric_names, list(avg))])
-            print('step %d: elapsed=%.4f time=%.4f, %s'
-                    % (step, (stop_time - global_start_time), (stop_time - start_time), txt))
+            print('step %d: elapsed=%.4f time=%.4f'
+                    % (step, (stop_time - global_start_time), (stop_time - start_time)))
+            print('', txt)
             if summary_writer:
-                sess.run([summaries], feed_dict=feed_dict)
-                summary_writer.add_summary(summaries, step)
+                s, = sess.run([summaries], feed_dict=feed_dict)
+                summary_writer.add_summary(s, step)
             epoch += 1
             if epoch and (epoch % FLAGS.ckpt_epochs == 0):
                 ckpt_path = '%s/%d' % (FLAGS.model, step)

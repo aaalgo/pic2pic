@@ -19,7 +19,7 @@ flags.DEFINE_string('B', None, '')
 flags.DEFINE_string('G', 'G', '')
 flags.DEFINE_string('D', 'D', '')
 flags.DEFINE_string('opt', 'adam', '')
-flags.DEFINE_float('eta', 0.01, '')
+flags.DEFINE_float('eta', 0.1, '')
 flags.DEFINE_float('learning_rate', 0.01, 'Initial learning rate.')
 flags.DEFINE_bool('decay', True, '')
 flags.DEFINE_float('decay_rate', 0.9, '')
@@ -81,28 +81,24 @@ def build_graph (A, B, optimizer, global_step):
     l2 = LossG(baB, B, 'Gbab')
     l3 = LossD(abL, 1, 'Gab')
     l4 = LossD(baL, 1, 'Gba')
-    loss = (l1 + l2) * FLAGS.eta + l3 + l4
+    loss = tf.identity((l1 + l2) * FLAGS.eta + l3 + l4, name='G')
 
     var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "G")
-    for x in var_list:
-        print("G: ", x.name)
     phases.append(('generate',
                   optimizer.minimize(loss, global_step=global_step, var_list=var_list),
-                  [l1, l2, l3, l4],  # metrics
+                  [loss, l1, l2, l3, l4],  # metrics
                   [bA, aB]))
 
     l1 = LossD(a1, 1, 'Da1')
     l2 = LossD(baL, 0, 'Da0')
     l3 = LossD(b1, 1, 'Db1')
     l4 = LossD(abL, 0, 'Db0')
-    loss = l1 + l2 + l3 + l4
+    loss = tf.identity(l1 + l2 + l3 + l4, name='D')
 
     var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "D")
-    for x in var_list:
-        print("D: ", x.name)
     phases.append(('discriminate',
                   optimizer.minimize(loss, global_step=global_step, var_list=var_list),
-                  [l1, l2, l3, l4],
+                  [loss, l1, l2, l3, l4],
                   []))
     vA = tf.saturate_cast(tf.concat(2, [A, abA, aB]), dtype=tf.uint8)
     vB = tf.saturate_cast(tf.concat(2, [B, baB, bA]), dtype=tf.uint8)

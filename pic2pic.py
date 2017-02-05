@@ -85,7 +85,7 @@ def build_graph (A, B, optimizer, global_step):
     l2 = LossG(baB, B, 'Gbab')
     l3 = LossD(abL, 1, 'Gab')
     l4 = LossD(baL, 1, 'Gba')
-    insure_pos_correlation = LossG(aB, A) + LossG(bA, B)
+    insure_pos_correlation = LossG(aB, A, 'insureAB') + LossG(bA, B, 'insureBA')
     loss = (l1 + l2) * (FLAGS.eta/2) + (l3 + l4)/2
     loss = tf.cond(global_step < 1000,
                     lambda: loss + insure_pos_correlation,

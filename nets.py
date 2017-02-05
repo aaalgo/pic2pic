@@ -28,15 +28,15 @@ def G (X, channels=1, scope=None, reuse=True):
                                     # 1/16
             net = slim.batch_norm(slim.conv2d(net, 128, 3, 1))
             net = slim.batch_norm(slim.conv2d(net, 128, 3, 1))
-            net = slim.batch_norm(slim.conv2d_transpose(net, 64, 3, 2))
+            net = slim.batch_norm(slim.conv2d_transpose(net, 64, 5, 2))
                                     # 1/8
             net = tf.concat(3, [net, stack.pop()])
-            net = slim.batch_norm(slim.conv2d_transpose(net, 64, 3, 2))
+            net = slim.batch_norm(slim.conv2d_transpose(net, 64, 5, 2))
                                     # 1/4
             net = tf.concat(3, [net, stack.pop()])
-            net = slim.batch_norm(slim.conv2d_transpose(net, 64, 3, 2))
+            net = slim.batch_norm(slim.conv2d_transpose(net, 64, 5, 2))
             net = tf.concat(3, [net, stack.pop()])
-            net = slim.batch_norm(slim.conv2d_transpose(net, 64, 3, 2))
+            net = slim.batch_norm(slim.conv2d_transpose(net, 64, 5, 2))
             net = tf.concat(3, [net, stack.pop()])
             net = slim.batch_norm(slim.conv2d(net, 32, 5, 1)) 
             net = slim.conv2d(net, channels, 1, 1, activation_fn=None) 

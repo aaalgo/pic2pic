@@ -17,7 +17,7 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string('A', None, '')
 flags.DEFINE_string('B', None, '')
 flags.DEFINE_string('Gnet', 'G', '')
-flags.DEFINE_string('Dnet', 'resnet', '')
+flags.DEFINE_string('Dnet', 'resnet_tiny', '')
 flags.DEFINE_string('opt', 'adam', '')
 flags.DEFINE_float('eta', 0.1, '')
 flags.DEFINE_float('learning_rate', 0.02, 'Initial learning rate.')

@@ -70,3 +70,26 @@ def resnet (X, scope=None, reuse=True):
                             scope=scope,
                             reuse=reuse)
     return net
+
+def resnet_tiny (X, scope=None, reuse=True):
+    blocks = [ 
+        resnet_utils.Block('block1', resnet_v1.bottleneck,
+                           [(64, 32, 1)] + [(64, 32, 2)]),
+        resnet_utils.Block('block2', resnet_v1.bottleneck,
+                           [(128, 64, 1)] + [(128, 64, 2)]),
+        resnet_utils.Block('block3', resnet_v1.bottleneck,
+                           [(256, 64, 1)]  + [(128, 64, 2)]),
+        resnet_utils.Block('block4', resnet_v1.bottleneck,
+                           [(256, 64, 1)]  + [(128, 64, 2)]),
+        resnet_utils.Block('block5', resnet_v1.bottleneck,
+                           [(256, 64, 1)]  + [(128, 64, 2)]),
+        resnet_utils.Block('block6', resnet_v1.bottleneck, [(128, 64, 1)])
+    	]   
+    net,_ = resnet_v1.resnet_v1(
+        inputs, blocks,
+        # all parameters below can be passed to resnet_v1.resnet_v1_??
+        num_classes = 2,       # don't produce final prediction
+        global_pool = True,       # produce 1x1 output, equivalent to input of a FC layer
+        reuse=reuse,              # do not re-use network
+        scope=scope)
+

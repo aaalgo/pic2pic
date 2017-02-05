@@ -58,8 +58,8 @@ def LossD (logits, l, name):
 
 def build_graph (A, B, Gopt, Dopt, global_step):
 
-    G = getattr(nets, FLAGS.G)  # generator generator
-    D = getattr(nets, FLAGS.D)  # discriminator generator
+    G = getattr(nets, FLAGS.Gnet)  # generator generator
+    D = getattr(nets, FLAGS.Dnet)  # discriminator generator
 
     #   A  -->  aB  --> abA, which must be same as A
     aB = G(A, channels=FLAGS.channels, scope='G/ab', reuse=False)
@@ -146,7 +146,7 @@ def main (_):
         optimizer = tf.train.GradientDescentOptimizer(rate)
         pass
 
-    phases = build_graph(A, B, optimizer optimizer, global_step)
+    phases = build_graph(A, B, optimizer, optimizer, global_step)
 
     metric_names = []
     for _, _, metrics, _, _ in phases:

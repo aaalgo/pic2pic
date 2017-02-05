@@ -207,9 +207,8 @@ def main (_):
             avg /= FLAGS.epoch_steps
             stop_time = time.time()
             txt = ', '.join(['%s=%.4f' % (a, b) for a, b in zip(metric_names, list(avg))])
-            print('step %d: elapsed=%.4f time=%.4f'
-                    % (step, (stop_time - global_start_time), (stop_time - start_time)))
-            print('', txt)
+            print('step %d: elapsed=%.4f time=%.4f %s'
+                    % (step, (stop_time - global_start_time), (stop_time - start_time), txt))
             if summary_writer:
                 s, = sess.run([summaries], feed_dict=feed_dict)
                 summary_writer.add_summary(s, step)

@@ -19,6 +19,7 @@ flags.DEFINE_string('B', None, '')
 flags.DEFINE_string('G', 'G', '')
 flags.DEFINE_string('D', 'D', '')
 flags.DEFINE_string('opt', 'adam', '')
+flags.DEFINE_float('eta', 0.02, '')
 flags.DEFINE_float('learning_rate', 0.01, 'Initial learning rate.')
 flags.DEFINE_bool('decay', True, '')
 flags.DEFINE_float('decay_rate', 0.9, '')
@@ -61,17 +62,17 @@ def build_graph (A, B, optimizer, global_step):
     D = getattr(nets, FLAGS.D)  # discriminator generator
 
     #   A  -->  aB  --> abA, which must be same as A
-    aB = G(A, scope='G/ab', reuse=True)
-    abA = G(aB, scope='G/ba', reuse=True)
+    aB = G(A, channels=FLAGS.channels, scope='G/ab', reuse=False)
+    abA = G(aB, channels=FLAGS.channels, scope='G/ba', reuse=False)
     #   B  -->  bA  --> baB, which must be same as B
-    bA = G(B, scope='G/ba', reuse=True)
-    baB = G(bA, scope='G/ab', reuse=True)
+    bA = G(B, channels=FLAGS.channels, scope='G/ba', reuse=True)
+    baB = G(bA, channels=FLAGS.channels, scope='G/ab', reuse=True)
 
-    a1 = D(A, scope='D/a')
-    abL = D(aB, scope='D/b')
+    a1 = D(A, scope='D/a', reuse=False)
+    abL = D(aB, scope='D/b', reuse=False)
     
-    b1 = D(B, scope='D/b')
-    baL = D(bA, scope='D/a')
+    b1 = D(B, scope='D/b', reuse=True)
+    baL = D(bA, scope='D/a', reuse=True)
 
     phases = []
 
@@ -80,7 +81,7 @@ def build_graph (A, B, optimizer, global_step):
     l2 = LossG(baB, B, 'Gbab')
     l3 = LossD(abL, 1, 'Gab')
     l4 = LossD(baL, 1, 'Gba')
-    loss = l1 + l2 + l3 + l4
+    loss = (l1 + l2) * FLAGS.eta + l3 + l4
 
     var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "G")
     phases.append(('generate',
@@ -99,6 +100,10 @@ def build_graph (A, B, optimizer, global_step):
                   optimizer.minimize(loss, global_step=global_step, var_list=var_list),
                   [l1, l2, l3, l4],
                   []))
+    vA = tf.concat(2, [A, abA, aB])
+    vB = tf.concat(2, [B, baB, bA])
+    tf.summary.image('A', vA)
+    tf.summary.image('B', vB)
     return phases
 
 def main (_):
@@ -107,7 +112,8 @@ def main (_):
         os.makedirs(FLAGS.model)
     except:
         pass
-    assert FLAGS.db and os.path.exists(FLAGS.db)
+    assert FLAGS.A and os.path.exists(FLAGS.A)
+    assert FLAGS.B and os.path.exists(FLAGS.B)
 
     A = tf.placeholder(tf.float32, shape=(None, None, None, FLAGS.channels), name="A")
     B = tf.placeholder(tf.float32, shape=(None, None, None, FLAGS.channels), name="B")
@@ -130,17 +136,20 @@ def main (_):
     phases = build_graph(A, B, optimizer, global_step)
 
     metric_names = []
-    for train, metrics in phases:
+    for _, _, metrics, _ in phases:
         metric_names.extend([x.name[:-2] for x in metrics])
 
+    summaries = tf.constant(1)
+    summary_writer = None
     if FLAGS.log:
-        train_summaries = tf.summary.merge_all()
-        assert not train_summaries is None
+        summaries = tf.summary.merge_all()
+        assert not summaries is None
         summary_writer = tf.summary.FileWriter(FLAGS.log, tf.get_default_graph(), flush_secs=20)
 
     saver = tf.train.Saver(max_to_keep=FLAGS.max_to_keep)
 
-    tf.get_default_graph().finialize()
+    init = tf.global_variables_initializer()
+    tf.get_default_graph().finalize()
 
     picpac_config = dict(seed=2016,
                 shuffle=True,
@@ -169,7 +178,7 @@ def main (_):
     sess_config.gpu_options.allow_growth=True
 
     with tf.Session(config=sess_config) as sess:
-        sess.run(tf.global_variables_initializer())
+        sess.run(init)
         if FLAGS.resume:
             saver.restore(sess, FLAGS.resume)
         step = 0
@@ -186,7 +195,7 @@ def main (_):
                 for _, train, metrics, forward in phases:
                     feed_dict = {A: a, B: b}
                     feed_dict.update(forward_dict)
-                    _, m, f, _ = sess.run([train, metrics, forward, train_summaries], feed_dict=feed_dict)
+                    _, m, f= sess.run([train, metrics, forward], feed_dict=feed_dict)
                     forward_dict = dict(zip(forward, f))
                     m_off_n = m_off + len(metrics)
                     avg[m_off:m_off_n] += m
@@ -200,6 +209,7 @@ def main (_):
             print('step %d: elapsed=%.4f time=%.4f, %s'
                     % (step, (stop_time - global_start_time), (stop_time - start_time), txt))
             if summary_writer:
+                sess.run([summaries], feed_dict=feed_dict)
                 summary_writer.add_summary(summaries, step)
             epoch += 1
             if epoch and (epoch % FLAGS.ckpt_epochs == 0):

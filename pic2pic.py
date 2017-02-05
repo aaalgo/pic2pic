@@ -81,12 +81,12 @@ def build_graph (A, B, optimizer, global_step):
     l2 = LossG(baB, B, 'Gbab')
     l3 = LossD(abL, 1, 'Gab')
     l4 = LossD(baL, 1, 'Gba')
-    loss = tf.identity((l1 + l2) * FLAGS.eta + l3 + l4, name='G')
+    loss = tf.identity((l1 + l2) * (FLAGS.eta/2) + (l3 + l4)/2, name='G')
 
     var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "G")
     phases.append(('generate',
                   optimizer.minimize(loss, global_step=global_step, var_list=var_list),
-                  [loss, l1, l2, l3, l4],  # metrics
+                  [loss, tf.identity((l1+l2)/2, name='GG'), tf.identity((l3+l4)/2,name='GD')],  # metrics
                   [bA, aB]))
 
     l1 = LossD(a1, 1, 'Da1')
@@ -98,7 +98,7 @@ def build_graph (A, B, optimizer, global_step):
     var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "D")
     phases.append(('discriminate',
                   optimizer.minimize(loss, global_step=global_step, var_list=var_list),
-                  [loss, l1, l2, l3, l4],
+                  [loss],
                   []))
     vA = tf.saturate_cast(tf.concat(2, [A, abA, aB]), dtype=tf.uint8)
     vB = tf.saturate_cast(tf.concat(2, [B, baB, bA]), dtype=tf.uint8)

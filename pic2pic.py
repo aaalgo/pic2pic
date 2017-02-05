@@ -96,7 +96,7 @@ def build_graph (A, B, Gopt, Dopt, global_step):
 
     var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "G")
     phases.append(('generate',
-                  optimizer.minimize(loss, global_step=global_step, var_list=var_list),
+                  Gopt.minimize(loss, global_step=global_step, var_list=var_list),
                   [loss, l1, l2, tf.identity((l3+l4)/2,name='Gxe')],  # metrics
                   [bA, aB], []))
 

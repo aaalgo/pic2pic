@@ -86,14 +86,14 @@ def build_graph (A, B, optimizer, global_step):
     var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "G")
     phases.append(('generate',
                   optimizer.minimize(loss, global_step=global_step, var_list=var_list),
-                  [loss, tf.identity((l1+l2)/2, name='GG'), tf.identity((l3+l4)/2,name='GD')],  # metrics
+                  [loss, l1, l2, tf.identity((l3+l4)/2,name='Gxe')],  # metrics
                   [bA, aB]))
 
     l1 = LossD(a1, 1, 'Da1')
     l2 = LossD(baL, 0, 'Da0')
     l3 = LossD(b1, 1, 'Db1')
     l4 = LossD(abL, 0, 'Db0')
-    loss = tf.identity(l1 + l2 + l3 + l4, name='D')
+    loss = tf.identity((l1 + l2 + l3 + l4)/4, name='Dxe')
 
     var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "D")
     phases.append(('discriminate',

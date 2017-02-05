@@ -29,13 +29,13 @@ flags.DEFINE_string('model', 'model', 'Directory to put the training data.')
 flags.DEFINE_string('resume', None, '')
 flags.DEFINE_integer('max_steps', 400000, '')
 flags.DEFINE_integer('epoch_steps', 100, '')
-flags.DEFINE_integer('ckpt_epochs', 100, '')
+flags.DEFINE_integer('ckpt_epochs', 10, '')
 flags.DEFINE_string('log', None, 'tensorboard')
 flags.DEFINE_integer('max_summary_images', 20, '')
 flags.DEFINE_integer('channels', 1, '')
 flags.DEFINE_integer('stride', 32, '')
 flags.DEFINE_integer('verbose', logging.INFO, '')
-flags.DEFINE_integer('max_to_keep', 1000, '')
+flags.DEFINE_integer('max_to_keep', 200, '')
 
 def LossG (X, Y, name):
     diff = tf.subtract(X, Y)
@@ -63,10 +63,14 @@ def build_graph (A, B, optimizer, global_step):
 
     #   A  -->  aB  --> abA, which must be same as A
     aB = G(A, channels=FLAGS.channels, scope='G/ab', reuse=False)
+    tf.identity(aB, name='AB')
     abA = G(aB, channels=FLAGS.channels, scope='G/ba', reuse=False)
+    tf.identity(abA, name='ABA')
     #   B  -->  bA  --> baB, which must be same as B
     bA = G(B, channels=FLAGS.channels, scope='G/ba', reuse=True)
+    tf.identity(bA, name='BA')
     baB = G(bA, channels=FLAGS.channels, scope='G/ab', reuse=True)
+    tf.identity(baB, name='BAB')
 
     a1 = D(A, scope='D/a', reuse=False)
     abL = D(aB, scope='D/b', reuse=False)
@@ -81,7 +85,13 @@ def build_graph (A, B, optimizer, global_step):
     l2 = LossG(baB, B, 'Gbab')
     l3 = LossD(abL, 1, 'Gab')
     l4 = LossD(baL, 1, 'Gba')
-    loss = tf.identity((l1 + l2) * (FLAGS.eta/2) + (l3 + l4)/2, name='G')
+    insure_pos_correlation = LossG(aB, A) + LossG(bA, B)
+    loss = (l1 + l2) * (FLAGS.eta/2) + (l3 + l4)/2
+    loss = tf.cond(global_step < 1000,
+                    lambda: loss + insure_pos_correlation,
+                    lambda: loss)
+
+    loss = tf.identity(loss, name='G')
 
     var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "G")
     phases.append(('generate',
@@ -100,8 +110,8 @@ def build_graph (A, B, optimizer, global_step):
                   optimizer.minimize(loss, global_step=global_step, var_list=var_list),
                   [loss],
                   []))
-    vA = tf.saturate_cast(tf.concat(2, [A, abA, aB]), dtype=tf.uint8)
-    vB = tf.saturate_cast(tf.concat(2, [B, baB, bA]), dtype=tf.uint8)
+    vA = tf.saturate_cast(tf.concat(2, [A, abA, aB]), dtype=tf.uint8, name='vA')
+    vB = tf.saturate_cast(tf.concat(2, [B, baB, bA]), dtype=tf.uint8, name='vB')
 
     tf.summary.image('A', vA)
     tf.summary.image('B', vB)

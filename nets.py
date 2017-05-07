@@ -6,6 +6,7 @@ import os
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
 from tensorflow.contrib.slim.nets import resnet_v1
+from tensorflow.contrib.slim.nets import resnet_utils
 from tensorflow.python.ops import variable_scope
 
 def G (X, channels=1, scope=None, reuse=True):
@@ -86,10 +87,11 @@ def resnet_tiny (X, scope=None, reuse=True):
         resnet_utils.Block('block6', resnet_v1.bottleneck, [(128, 64, 1)])
     	]   
     net,_ = resnet_v1.resnet_v1(
-        inputs, blocks,
+        X, blocks,
         # all parameters below can be passed to resnet_v1.resnet_v1_??
         num_classes = 2,       # don't produce final prediction
         global_pool = True,       # produce 1x1 output, equivalent to input of a FC layer
         reuse=reuse,              # do not re-use network
         scope=scope)
+    return net
 

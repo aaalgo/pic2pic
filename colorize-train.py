@@ -12,6 +12,7 @@ import logging
 from tqdm import tqdm
 import numpy as np
 import tensorflow as tf
+import cv2
 import picpac
 import colorize_nets
 import _pic2pic
@@ -27,6 +28,7 @@ flags.DEFINE_bool('decay', True, '')
 flags.DEFINE_float('decay_rate', 0.9, '')
 flags.DEFINE_float('decay_steps', 10000, '')
 flags.DEFINE_string('model', 'model', '')
+flags.DEFINE_string('log', 'log', '')
 flags.DEFINE_string('resume', None, '')
 
 flags.DEFINE_integer('batch', 16, '')
@@ -37,14 +39,48 @@ flags.DEFINE_integer('verbose', logging.INFO, '')
 flags.DEFINE_integer('max_to_keep', 200, '')
 flags.DEFINE_integer('encoding_threads', 4, '')
 
+VIS_KEY = 'visualize'
+
+# weighted cross entropy
 def colorize_loss (logits, labels):
     # to HWC
     logits = tf.reshape(logits, (-1, AB_BINS))
     labels = tf.reshape(labels, (-1, AB_BINS))
     xe = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=labels)
     xe = tf.reduce_mean(xe, name='xe')
+    tf.summary.scalar('xe', xe)
     loss = xe
     return loss, [xe]
+
+ab_dict = _pic2pic.ab_dict()
+
+def decode_lab (l, ab):
+    ab_flat = np.reshape(ab, (-1, ab.shape[-1]))
+    ab_small = np.reshape(np.dot(ab_flat, ab_dict), ab.shape[:3] + (2,))
+
+    _, H, W, _ = l.shape
+    lab_one = np.zeros((H, W, 3), dtype=np.float32)
+
+    rgb = np.zeros(l.shape[:3] + (3,), dtype=np.float32)
+    for i in range(l.shape[0]):
+        lab_one[:, :, :1] = l[i]
+        lab_one[:, :, 1:] = cv2.resize(ab_small[i], (W, H))
+        rgb[i] = cv2.cvtColor(lab_one, cv2.COLOR_LAB2RGB)
+        pass
+    return rgb
+
+def decode_lab_tensor (L, AB, AB_DICT):
+
+    AB_flat = tf.reshape(AB, (-1, AB_BINS))
+    small_shape = tf.unpack(tf.shape(AB))
+    small_shape.pop()
+    small_shape.append(tf.constant(2, dtype=tf.int32))
+    AB_small = tf.reshape(tf.matmul(AB_FLAT, AB_DICT), tf.pack(small_shape))
+
+    shape = tf.pack(tf.unpack(tf.shape(L))[1:-1])
+    AB_big = tf.image.resize_images(AB_small, shape)
+    LAB = tf.stack([L, AB_big], axis=3)
+    pass
 
 def main (_):
     logging.basicConfig(level=FLAGS.verbose)
@@ -54,22 +90,29 @@ def main (_):
         pass
     assert FLAGS.db and os.path.exists(FLAGS.db)
 
+    X  = tf.placeholder(tf.float32, shape=(None, None, None, 3), name="input")
+    Y  = tf.placeholder(tf.float32, shape=(None, None, None, 3), name="output")
+
     L  = tf.placeholder(tf.float32, shape=(None, None, None, 1), name="L")	 # channel L as input
     AB = tf.placeholder(tf.float32, shape=(None, None, None, AB_BINS), name="ab") # soft-binned ab as output
 
     queue = tf.FIFOQueue(128, (tf.float32, tf.float32))
-    enc_LAB = queue.enqueue((L, AB))
+    enc = queue.enqueue((L, AB))
     dec_L, dec_AB = queue.dequeue()
     dec_L.set_shape(L.get_shape())
     dec_AB.set_shape(AB.get_shape())
+    tf.summary.image('input', X)
+    tf.summary.image('output', Y)
 
     rate = tf.constant(FLAGS.learning_rate)
     global_step = tf.Variable(0, name='global_step', trainable=False)
     if FLAGS.decay:
         rate = tf.train.exponential_decay(rate, global_step, FLAGS.decay_steps, FLAGS.decay_rate, staircase=True)
+        tf.summary.scalar('learning_rate', rate)
     optimizer = tf.train.AdamOptimizer(rate)
 
     logits, stride, downsize = getattr(colorize_nets, FLAGS.net)(dec_L, classes=AB_BINS)
+    prob = tf.nn.softmax(logits)
 
     loss, metrics = colorize_loss(logits, dec_AB)
 
@@ -78,6 +121,9 @@ def main (_):
     metric_names = [x.name[:-2] for x in metrics]
 
     saver = tf.train.Saver(max_to_keep=FLAGS.max_to_keep)
+
+    summaries = tf.summary.merge_all()
+    log = tf.summary.FileWriter(FLAGS.log, tf.get_default_graph(), flush_secs=20)
 
     init = tf.global_variables_initializer()
 
@@ -114,7 +160,7 @@ def main (_):
             while not coord.should_stop():
                 images, _, _ = stream.next()
                 l, ab, w = _pic2pic.encode_lab(images, downsize)
-                sess.run([enc_LAB], feed_dict={L: l, AB: ab})
+                sess.run([enc], feed_dict={L: l, AB: ab})
             pass
 
         # create encoding threads
@@ -128,13 +174,23 @@ def main (_):
         while step < FLAGS.max_steps:
             start_time = time.time()
             m_avg = np.array([0] * len(metric_names), dtype=np.float32)
-            for _ in tqdm(range(FLAGS.epoch_steps), leave=False):
+            for i in tqdm(range(FLAGS.epoch_steps), leave=False):
                 if coord.should_stop():
                     break
-                _, m= sess.run([train_op, metrics])
+                if i + 1 == FLAGS.epoch_steps:
+                    # run with summary
+                    l, ab = sess.run([dec_L, dec_AB])
+                    x = decode_lab(l, ab)
+                    ab_p, = sess.run([prob], feed_dict={dec_L: l, dec_AB: ab})
+                    y = decode_lab(l, ab_p)
+                    _, m, s = sess.run([train_op, metrics, summaries], feed_dict={dec_L: l, dec_AB: ab, X: x, Y: y})
+                    log.add_summary(s, step)
+                else:
+                    _, m = sess.run([train_op, metrics])
                 m_avg += m
                 step += 1
                 pass
+
             m_avg /= FLAGS.epoch_steps
             stop_time = time.time()
 
@@ -150,8 +206,11 @@ def main (_):
             pass
         coord.request_stop()
         coord.join(threads)
+        log.close()
         pass
+    
     pass
+
 
 if __name__ == '__main__':
     tf.app.run()

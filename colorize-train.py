@@ -2,6 +2,8 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
+import sys
+sys.path.append('build/lib.linux-x86_64-2.7')
 import os
 #os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import time
@@ -18,7 +20,7 @@ AB_BINS = 313
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-flags.DEFINE_string('db', None, '')
+flags.DEFINE_string('db', 'ilsvrc2015.train', '')
 flags.DEFINE_string('net', 'simple', '') 
 flags.DEFINE_float('learning_rate', 0.02/100, 'initial learning rate.')
 flags.DEFINE_bool('decay', True, '')
@@ -27,17 +29,19 @@ flags.DEFINE_float('decay_steps', 10000, '')
 flags.DEFINE_string('model', 'model', '')
 flags.DEFINE_string('resume', None, '')
 
+flags.DEFINE_integer('batch', 16, '')
 flags.DEFINE_integer('max_steps', 400000, '')
 flags.DEFINE_integer('epoch_steps', 100, '')
 flags.DEFINE_integer('ckpt_epochs', 50, '')
 flags.DEFINE_integer('verbose', logging.INFO, '')
 flags.DEFINE_integer('max_to_keep', 200, '')
+flags.DEFINE_integer('encoding_threads', 4, '')
 
 def colorize_loss (logits, labels):
     # to HWC
     logits = tf.reshape(logits, (-1, AB_BINS))
     labels = tf.reshape(labels, (-1, AB_BINS))
-    xe = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=labels)
+    xe = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=labels)
     xe = tf.reduce_mean(xe, name='xe')
     loss = xe
     return loss, [xe]
@@ -50,13 +54,14 @@ def main (_):
         pass
     assert FLAGS.db and os.path.exists(FLAGS.db)
 
-    X  = tf.placeholder(tf.float32, shape=(None, None, None, 1), name="L")	 # channel L as input
-    Y = tf.placeholder(tf.float32, shape=(None, None, None, AB_BINS), name="ab") # soft-binned ab as output
+    L  = tf.placeholder(tf.float32, shape=(None, None, None, 1), name="L")	 # channel L as input
+    AB = tf.placeholder(tf.float32, shape=(None, None, None, AB_BINS), name="ab") # soft-binned ab as output
 
     queue = tf.FIFOQueue(128, (tf.float32, tf.float32))
-    enc_XY = queue.enqueue((X, Y))
-    dec_XY = queue.dequeue()
-
+    enc_LAB = queue.enqueue((L, AB))
+    dec_L, dec_AB = queue.dequeue()
+    dec_L.set_shape(L.get_shape())
+    dec_AB.set_shape(AB.get_shape())
 
     rate = tf.constant(FLAGS.learning_rate)
     global_step = tf.Variable(0, name='global_step', trainable=False)
@@ -64,18 +69,13 @@ def main (_):
         rate = tf.train.exponential_decay(rate, global_step, FLAGS.decay_steps, FLAGS.decay_rate, staircase=True)
     optimizer = tf.train.AdamOptimizer(rate)
 
-    logits, stride = getattr(colorize_nets, FLAGS.net)(X, classes=AB_BINS)
-    #phases = build_graph(A, B, optimizer, optimizer, global_step)
-    loss, metrics = colorize_loss(logits, Y)
+    logits, stride, downsize = getattr(colorize_nets, FLAGS.net)(dec_L, classes=AB_BINS)
+
+    loss, metrics = colorize_loss(logits, dec_AB)
 
     train_op = optimizer.minimize(loss, global_step=global_step)
 
-    #metric_names = []
-    #for _, _, metrics, _, _ in phases:
-    #    metric_names.extend([x.name[:-2] for x in metrics])
     metric_names = [x.name[:-2] for x in metrics]
-    #for x in metrics:
-    #    tf.summary.scalar(x.name.replace(':', '_'), x)
 
     saver = tf.train.Saver(max_to_keep=FLAGS.max_to_keep)
 
@@ -84,21 +84,23 @@ def main (_):
     tf.get_default_graph().finalize()
 
     picpac_config = dict(seed=2016,
+                max_size=200,
+                min_size=192,
+                crop_width=176,
+                crop_height=176,
                 shuffle=True,
                 reshuffle=True,
-                batch=1,
-                split=1,
-                split_fold=0,
+                batch=FLAGS.batch,
                 round_div=stride,
                 channels=3,
                 stratify=False,
-                pert_min_scale=0.9,
+                pert_min_scale=1, #0.92,
                 pert_max_scale=1.5,
                 channel_first=False # this is tensorflow specific
                                     # Caffe's dimension order is different.
                 )
 
-    stream = picpac.ImageStream(FLAGS.db, perturb=True, loop=True, **picpac_config)
+    stream = picpac.ImageStream(FLAGS.db, perturb=False, loop=True, **picpac_config)
 
     sess_config = tf.ConfigProto()
 
@@ -111,12 +113,12 @@ def main (_):
         def encode_sample (): 
             while not coord.should_stop():
                 images, _, _ = stream.next()
-                l, ab, w = _pic2pic.encode_lab(images)
-                sess.run([enc_XY], feed_dict={X: l, Y: ab})
+                l, ab, w = _pic2pic.encode_lab(images, downsize)
+                sess.run([enc_LAB], feed_dict={L: l, AB: ab})
             pass
 
         # create encoding threads
-        threads = [threading.Thread(target=encode_sample, args=()) for _ in range(1)]
+        threads = [threading.Thread(target=encode_sample, args=()) for _ in range(FLAGS.encoding_threads)]
         for t in threads:
             t.start()
 

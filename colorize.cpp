@@ -37,7 +37,6 @@ AB::AB (): W(BINS) {
 void AB::encode (float const *ab, float *bins, float *w, std::pair<float, int> *dists) {
     int ai = int(roundf(ab[0]/BIN_STEP)) - a_bin_min;
     int bi = int(roundf(ab[1]/BIN_STEP)) - b_bin_min;
-    int constexpr bl = 2 * SEARCH_RADIUS + 1;
     cv::Rect_<int> roi(bi-SEARCH_RADIUS,
                    ai-SEARCH_RADIUS,
                    SEARCH_W, SEARCH_W);

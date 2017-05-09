@@ -4,7 +4,9 @@ LDLIBS += -lboost_program_options $(shell pkg-config --libs opencv) -lglog -lgfl
 
 .PHONY:	all 
 
-all:	stat-ab test-ab
+all:	#	stat-ab test-ab
+	python setup.py build
+
 
 test-ab:	test-ab.cpp colorize.cpp
 

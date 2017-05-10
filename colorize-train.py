@@ -49,7 +49,8 @@ def colorize_loss (logits, labels, weights):
     labels = tf.reshape(labels, (-1, AB_BINS))
     weights = tf.reshape(weights, (-1,))
     xe = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=labels)
-    xe = tf.reduce_mean(xe * weights, name='xe')
+    xe = tf.reduce_mean(xe * weights) * AB_BINS
+    xe = tf.identity(xe, 'xe')
     tf.summary.scalar('xe', xe)
     loss = xe
     return loss, [xe]

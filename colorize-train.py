@@ -43,12 +43,13 @@ flags.DEFINE_integer('encoding_threads', 4, '')
 VIS_KEY = 'visualize'
 
 # weighted cross entropy
-def colorize_loss (logits, labels):
+def colorize_loss (logits, labels, weights):
     # to HWC
     logits = tf.reshape(logits, (-1, AB_BINS))
     labels = tf.reshape(labels, (-1, AB_BINS))
+    weights = tf.reshape(weights, (-1,))
     xe = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=labels)
-    xe = tf.reduce_mean(xe, name='xe')
+    xe = tf.reduce_mean(xe * weights, name='xe')
     tf.summary.scalar('xe', xe)
     loss = xe
     return loss, [xe]
@@ -70,19 +71,6 @@ def decode_lab (l, ab):
         pass
     return rgb
 
-def decode_lab_tensor (L, AB, AB_DICT):
-
-    AB_flat = tf.reshape(AB, (-1, AB_BINS))
-    small_shape = tf.unpack(tf.shape(AB))
-    small_shape.pop()
-    small_shape.append(tf.constant(2, dtype=tf.int32))
-    AB_small = tf.reshape(tf.matmul(AB_FLAT, AB_DICT), tf.pack(small_shape))
-
-    shape = tf.pack(tf.unpack(tf.shape(L))[1:-1])
-    AB_big = tf.image.resize_images(AB_small, shape)
-    LAB = tf.stack([L, AB_big], axis=3)
-    pass
-
 def main (_):
     logging.basicConfig(level=FLAGS.verbose)
     try:
@@ -96,12 +84,15 @@ def main (_):
 
     L  = tf.placeholder(tf.float32, shape=(None, None, None, 1), name="L")	 # channel L as input
     AB = tf.placeholder(tf.float32, shape=(None, None, None, AB_BINS), name="ab") # soft-binned ab as output
+    W  = tf.placeholder(tf.float32, shape=(None, None, None, 1), name="W")	 # channel L as input
 
-    queue = tf.FIFOQueue(128, (tf.float32, tf.float32))
-    enc = queue.enqueue((L, AB))
-    dec_L, dec_AB = queue.dequeue()
+
+    queue = tf.FIFOQueue(128, (tf.float32, tf.float32, tf.float32))
+    enc = queue.enqueue((L, AB, W))
+    dec_L, dec_AB, dec_W = queue.dequeue()
     dec_L.set_shape(L.get_shape())
     dec_AB.set_shape(AB.get_shape())
+    dec_W.set_shape(W.get_shape())
     tf.summary.image('input', X, max_outputs=5)
     tf.summary.image('output', Y, max_outputs=5)
 
@@ -115,7 +106,7 @@ def main (_):
     logits, stride, downsize = getattr(colorize_nets, FLAGS.net)(dec_L, classes=AB_BINS)
     prob = tf.nn.softmax(logits)
 
-    loss, metrics = colorize_loss(logits, dec_AB)
+    loss, metrics = colorize_loss(logits, dec_AB, dec_W)
 
     train_op = optimizer.minimize(loss, global_step=global_step)
 
@@ -165,7 +156,7 @@ def main (_):
             while not coord.should_stop():
                 images, _, _ = stream.next()
                 l, ab, w = _pic2pic.encode_lab(images, downsize)
-                sess.run([enc], feed_dict={L: l, AB: ab})
+                sess.run([enc], feed_dict={L: l, AB: ab, W: w})
             pass
 
         # create encoding threads
@@ -184,9 +175,9 @@ def main (_):
                     break
                 if i + 1 == FLAGS.epoch_steps:
                     # run with summary
-                    l, ab = sess.run([dec_L, dec_AB])
+                    l, ab, w = sess.run([dec_L, dec_AB, dec_W])
                     x = decode_lab(l, ab)
-                    ab_p, = sess.run([prob], feed_dict={dec_L: l, dec_AB: ab})
+                    ab_p, = sess.run([prob], feed_dict={dec_L: l, dec_AB: ab, dec_W: w})
                     y = decode_lab(l, ab_p)
                     _, m, s = sess.run([train_op, metrics, summaries], feed_dict={dec_L: l, dec_AB: ab, X: x, Y: y})
                     log.add_summary(s, step)

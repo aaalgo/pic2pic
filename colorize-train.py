@@ -8,6 +8,7 @@ import os
 #os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import time
 import threading
+import subprocess
 import logging
 from tqdm import tqdm
 import numpy as np
@@ -25,7 +26,7 @@ flags.DEFINE_string('db', 'ilsvrc2015.train', '')
 flags.DEFINE_string('net', 'simple', '') 
 flags.DEFINE_float('learning_rate', 0.02/100, 'initial learning rate.')
 flags.DEFINE_bool('decay', True, '')
-flags.DEFINE_float('decay_rate', 0.9, '')
+flags.DEFINE_float('decay_rate', 0.95, '')
 flags.DEFINE_float('decay_steps', 10000, '')
 flags.DEFINE_string('model', 'model', '')
 flags.DEFINE_string('log', 'log', '')
@@ -123,6 +124,9 @@ def main (_):
     saver = tf.train.Saver(max_to_keep=FLAGS.max_to_keep)
 
     summaries = tf.summary.merge_all()
+    if FLAGS.resume is None:
+        if FLAGS.log[0] != '/':
+            subprocess.check_call("rm -rf %s" % FLAGS.log, shell=True)
     log = tf.summary.FileWriter(FLAGS.log, tf.get_default_graph(), flush_secs=20)
 
     init = tf.global_variables_initializer()
@@ -130,6 +134,7 @@ def main (_):
     tf.get_default_graph().finalize()
 
     picpac_config = dict(seed=2016,
+                cache=False,
                 max_size=200,
                 min_size=192,
                 crop_width=176,

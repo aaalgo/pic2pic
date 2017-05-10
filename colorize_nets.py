@@ -36,15 +36,15 @@ def simple (X, classes=2):
         net = slim.batch_norm(net)
 
         # conv5
-        net = slim.conv2d(net, 512, 3, 1)   # dilation 2
-        net = slim.conv2d(net, 512, 3, 1)   # dilation 2
-        net = slim.conv2d(net, 512, 3, 1)   # conv5_3   dilation 2
+        net = slim.conv2d(net, 512, 3, 1, rate=2)
+        net = slim.conv2d(net, 512, 3, 1, rate=2)
+        net = slim.conv2d(net, 512, 3, 1, rate=2)
         net = slim.batch_norm(net)
 
         # conv6
-        net = slim.conv2d(net, 512, 3, 1)   # dil
-        net = slim.conv2d(net, 512, 3, 1)   # dil
-        net = slim.conv2d(net, 512, 3, 1)   # dil
+        net = slim.conv2d(net, 512, 3, 1, rate=2)
+        net = slim.conv2d(net, 512, 3, 1, rate=2)
+        net = slim.conv2d(net, 512, 3, 1, rate=2)
         net = slim.batch_norm(net)
         
         # conv7

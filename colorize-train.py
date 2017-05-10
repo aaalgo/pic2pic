@@ -57,8 +57,20 @@ def colorize_loss (logits, labels, weights):
 
 ab_dict = _pic2pic.ab_dict()
 
-def decode_lab (l, ab):
+def decode_lab (l, ab, T=None):
     ab_flat = np.reshape(ab, (-1, ab.shape[-1]))
+    if not T is None:   # need to test
+        o = ab_flat
+        ab_flat += 1e-15
+        np.log(ab_flat, ab_flat)
+        ab_flat /= T
+        np.exp(ab_flat, ab_flat)
+        S = np.sum(ab_flat, axis=0)
+        assert S.shape[0] == ab_flat.shape[0]
+        ab_flat /= S
+        assert np.byte_bounds(o) == np.byte_bounds(ab_flat)
+        pass
+
     ab_small = np.reshape(np.dot(ab_flat, ab_dict), ab.shape[:3] + (2,))
 
     _, H, W, _ = l.shape
@@ -205,7 +217,6 @@ def main (_):
         coord.join(threads)
         log.close()
         pass
-    
     pass
 
 

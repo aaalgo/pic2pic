@@ -35,7 +35,7 @@ flags.DEFINE_string('resume', None, '')
 
 flags.DEFINE_integer('batch', 4, '')
 flags.DEFINE_integer('max_steps', 400000, '')
-flags.DEFINE_integer('epoch_steps', 100, '')
+flags.DEFINE_integer('epoch_steps', 50, '')
 flags.DEFINE_integer('ckpt_epochs', 20, '')
 flags.DEFINE_integer('verbose', logging.INFO, '')
 flags.DEFINE_integer('max_to_keep', 200, '')
@@ -74,6 +74,7 @@ def generator (net, filters, scope='G'):
             # http://www.wdong.org/equivalence-of-subpixel-convolution-and-transposed-convolution.html
             net = slim.conv2d_transpose(net, filters, 6, 2, activation_fn=p_relu())
         net = slim.conv2d(net, 3, 7, 1, activation_fn=None)
+        net = tf.clip_by_value(net, 0, 255)
     return net
 
 # returns two feature vectors, L and H

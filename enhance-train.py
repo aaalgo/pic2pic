@@ -33,16 +33,17 @@ flags.DEFINE_string('model', 'model', '')
 flags.DEFINE_string('log', 'log', '')
 flags.DEFINE_string('resume', None, '')
 
-flags.DEFINE_integer('batch', 16, '')
+flags.DEFINE_integer('batch', 4, '')
 flags.DEFINE_integer('max_steps', 400000, '')
 flags.DEFINE_integer('epoch_steps', 100, '')
 flags.DEFINE_integer('ckpt_epochs', 20, '')
 flags.DEFINE_integer('verbose', logging.INFO, '')
 flags.DEFINE_integer('max_to_keep', 200, '')
+flags.DEFINE_integer('blur', 7, '')
 
 flags.DEFINE_integer('generator_downscale', 0, '')
 flags.DEFINE_integer('generator_blocks', 4, '')
-flags.DEFINE_integer('generator_upscale', 2, '')
+flags.DEFINE_integer('generator_upscale', 0, '')    # should be 2
 
 flags.DEFINE_integer('generator_filters', 64, '')
 flags.DEFINE_integer('discriminator_size', 32, '')
@@ -97,6 +98,10 @@ def feature_extractor (bgr255, scope='D'):
 def softminus (x):
     return x - tf.nn.softplus(x)
 
+def BGR2RGB (x):
+    chs = tf.unstack(x, axis=-1)
+    return tf.stack([chs[2], chs[1], chs[0]], axis=-1)
+
 def build_graph (optimizer, global_step):
 
     zoom = 2**(FLAGS.generator_upscale - FLAGS.generator_downscale)
@@ -110,15 +115,31 @@ def build_graph (optimizer, global_step):
     hi_size = tf.slice(tf.shape(Y), [1], [2])   # (H, W)
     lo_size = hi_size // zoom
 
-    X = tf.image.resize_images(Y, lo_size)
+    X = Y
+
+    if zoom == 1:
+        pass
+    else:
+        X = tf.image.resize_images(X, lo_size)
+
+    if not FLAGS.blur is None:
+        radius = FLAGS.blur * 3
+        kernel = np.zeros((radius*2+1, radius*2+1), dtype=np.float32)
+        kernel[radius, radius] = 1.0
+        kernel = cv2.blur(kernel, (FLAGS.blur, FLAGS.blur))
+        eye = np.eye(3)
+
+        filters = np.reshape(np.outer(kernel, eye), kernel.shape + eye.shape)
+        X = tf.nn.conv2d(X, tf.constant(filters, dtype=tf.float32), [1,1,1,1], 'SAME')
+
     X = tf.identity(X, name='lo_res')
 
 
     G = tf.identity(generator(X, FLAGS.generator_filters), name='hi_res')
 
-    tf.summary.image('low_res', X, max_outputs=5)
-    tf.summary.image('hi_res', Y, max_outputs=5)
-    tf.summary.image('predict', G, max_outputs=5)
+    tf.summary.image('low_res', BGR2RGB(X), max_outputs=3)
+    tf.summary.image('hi_res', BGR2RGB(Y), max_outputs=3)
+    tf.summary.image('predict', BGR2RGB(G), max_outputs=3)
 
     # X and G need to go through the same feature extracting network
     # so we concatenate them first and then split the results
@@ -199,24 +220,24 @@ def main (_):
     tf.get_default_graph().finalize()
 
     picpac_config = dict(seed=2016,
-                cache=False,
-                max_size=200,
-                min_size=192,
-                crop_width=176,
-                crop_height=176,
+                cache=False,    # input 1280x718
+                #max_size=200,
+                #min_size=192,
+                crop_width=560,
+                crop_height=320,
                 shuffle=True,
                 reshuffle=True,
                 batch=FLAGS.batch,
                 round_div=2**FLAGS.generator_downscale,
                 channels=3,
                 stratify=False,
-                pert_min_scale=1, #0.92,
-                pert_max_scale=1.5,
+                pert_min_scale=0.45, # 576  x 323
+                pert_max_scale=0.55,
                 channel_first=False # this is tensorflow specific
                                     # Caffe's dimension order is different.
                 )
 
-    stream = picpac.ImageStream(FLAGS.db, perturb=False, loop=True, **picpac_config)
+    stream = picpac.ImageStream(FLAGS.db, perturb=True, loop=True, **picpac_config)
 
     sess_config = tf.ConfigProto()
 

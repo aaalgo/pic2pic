@@ -6,7 +6,7 @@ import sys
 sys.path.append('build/lib.linux-x86_64-2.7')
 sys.path.append('tensorflow-vgg')
 import os
-#os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import time
 import threading
 import subprocess
@@ -30,11 +30,12 @@ flags.DEFINE_bool('decay', True, '')
 flags.DEFINE_float('decay_rate', 0.9, '')
 flags.DEFINE_float('decay_steps', 10000, '')
 flags.DEFINE_string('model', 'model', '')
+flags.DEFINE_string('log', 'log', '')
 flags.DEFINE_string('resume', None, '')
 
 flags.DEFINE_integer('batch', 16, '')
 flags.DEFINE_integer('max_steps', 400000, '')
-flags.DEFINE_integer('epoch_steps', 200, '')
+flags.DEFINE_integer('epoch_steps', 100, '')
 flags.DEFINE_integer('ckpt_epochs', 20, '')
 flags.DEFINE_integer('verbose', logging.INFO, '')
 flags.DEFINE_integer('max_to_keep', 200, '')
@@ -54,7 +55,9 @@ def p_relu (alpha=0.25):
     return lambda net: tf.nn.relu(net) - alpha * tf.nn.relu(-net)
 
 # lo-res -> hi-res
-def generator (net, filters, scope):
+def generator (net, filters, scope='G'):
+    # with scope 'G', all variable will be of a name 'G/...'
+    # this way we can collect all generator variables to be trained with get_collection 'G'
     with tf.variable_scope(scope):
         net = slim.conv2d(net, filters, 7, 1, activation_fn=p_relu())
         # downscale
@@ -75,7 +78,7 @@ def generator (net, filters, scope):
 # returns two feature vectors, L and H
 # L is low-level perceptual feature
 # H is high-level discriminative feature, +1: real data; -1: generated data
-def feature_extractor (bgr255, scope):
+def feature_extractor (bgr255, scope='D'):
     c = FLAGS.discriminator_size
     vgg = Vgg19()   # vgg net is not trainable
     vgg.build(bgr255)
@@ -89,7 +92,7 @@ def feature_extractor (bgr255, scope):
         net = slim.conv2d(net, 3*c, 3, 2, activation_fn=p_relu())
         net = slim.conv2d(net, 2*c, 1, 1, activation_fn=p_relu())
         disc = slim.batch_norm(slim.conv2d(net, 1, 1, 1, activation_fn=None))
-    return vgg.conv2_2, net
+    return vgg.conv2_2, disc
 
 def softminus (x):
     return x - tf.nn.softplus(x)
@@ -110,11 +113,16 @@ def build_graph (optimizer, global_step):
     X = tf.image.resize_images(Y, lo_size)
     X = tf.identity(X, name='lo_res')
 
-    G = tf.identity(generator(X, FLAGS.generator_filters, 'G'), name='hi_res')
+
+    G = tf.identity(generator(X, FLAGS.generator_filters), name='hi_res')
+
+    tf.summary.image('low_res', X, max_outputs=5)
+    tf.summary.image('hi_res', Y, max_outputs=5)
+    tf.summary.image('predict', G, max_outputs=5)
 
     # X and G need to go through the same feature extracting network
     # so we concatenate them first and then split the results
-    L, H = feature_extractor(tf.concat([Y, G], axis=0), 'D')
+    L, H = feature_extractor(tf.concat([Y, G], axis=0))
 
     L1, L2 = tf.split(L, 2)  # low-level feature,    2 is prediction
     H1, H2 = tf.split(H, 2)  # high-level feature,   2 is prediction
@@ -126,15 +134,21 @@ def build_graph (optimizer, global_step):
     Gx = tf.slice(G, [0, 0, 1, 0], sub)
     Gy = tf.slice(G, [0, 1, 0, 0], sub)
 
-    loss_smooth = tf.reduce_mean(tf.pow(tf.square(G0 - Gx) + tf.square(G0 - Gy), 1.25), name='sm')
+    loss_smooth = tf.identity(tf.reduce_mean(
+                    tf.pow(tf.square(G0 - Gx) + tf.square(G0 - Gy), 1.25)) / 529357.9139706489,
+                    name = 'sm')
 
-    loss_adversary = tf.identity(1.0 - tf.reduce_mean(softminus(H2)), name='ad')
+    D_real = tf.reduce_mean(tf.nn.softplus(H1), name='dr')
+    D_fake = tf.reduce_mean(softminus(H2), name='df')
 
-    loss_discriminator = tf.reduce_mean(softminus(H2) - tf.nn.softplus(H1), name='di')
+    loss_adversary = tf.identity(1.0 - D_fake, name='ad')
 
-    loss_G = loss_perceptual * FLAGS.perceptual_weight + \
-             loss_smooth * FLAGS.smoothness_weight + \
-             loss_adversary * FLAGS.adversary_weight
+
+    loss_G = tf.identity(loss_perceptual * FLAGS.perceptual_weight + 
+                         loss_smooth * FLAGS.smoothness_weight + 
+                         loss_adversary * FLAGS.adversary_weight, name='lg')
+
+    loss_D = tf.identity(D_fake - D_real, name='ld')
 
     phases = []
     var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "G")
@@ -145,8 +159,8 @@ def build_graph (optimizer, global_step):
 
     var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "D")
     phases.append(('discriminate',
-                  optimizer.minimize(loss_discriminator, global_step=global_step, var_list=var_list),
-                  [loss_discriminator],
+                  optimizer.minimize(loss_D, global_step=global_step, var_list=var_list),
+                  [D_real, D_fake],
                   []))
 
     return Y, phases
@@ -173,6 +187,14 @@ def main (_):
         metric_names.extend([x.name[:-2] for x in metrics])
 
     init = tf.global_variables_initializer()
+
+    saver = tf.train.Saver(max_to_keep=FLAGS.max_to_keep)
+
+    summaries = tf.summary.merge_all()
+    if FLAGS.resume is None:
+        if FLAGS.log[0] != '/':
+            subprocess.check_call("rm -rf %s" % FLAGS.log, shell=True)
+    log = tf.summary.FileWriter(FLAGS.log, tf.get_default_graph(), flush_secs=20)
 
     tf.get_default_graph().finalize()
 
@@ -223,18 +245,23 @@ def main (_):
                     pass
                 step += 1
                 pass
+            images, _, _ = stream.next()
+            s, = sess.run([summaries], feed_dict={Y: images})
+            log.add_summary(s, step)
             avg /= FLAGS.epoch_steps
             stop_time = time.time()
-            txt = ', '.join(['%s=%.4f' % (a, b) for a, b in zip(metric_names, list(avg))])
-            print('step %d: elapsed=%.4f time=%.4f %s'
-                    % (step, (stop_time - global_start_time), (stop_time - start_time), txt))
             epoch += 1
+            saved = ''
             if epoch % FLAGS.ckpt_epochs == 0:
-                ckpt_path = '%s/%d' % (FLAGS.model, step)
-                saver.save(sess, ckpt_path)
-                print('epoch %d step %d, saving to %s in %.4fs.' % (epoch, step, ckpt_path, stop_time - start_time))
+                saver.save(sess, '%s/%d' % (FLAGS.model, step))
+                saved = ' saved'
+
+            txt = ', '.join(['%s=%.4f' % (a, b) for a, b in zip(metric_names, list(avg))])
+            print('step=%d elapsed=%.4f/%.4f  %s%s'
+                    % (step, (stop_time - start_time), (stop_time - global_start_time), txt, saved))
             pass
         pass
+        log.close()
     pass
 
 if __name__ == '__main__':

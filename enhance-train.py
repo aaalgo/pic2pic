@@ -18,13 +18,13 @@ import cv2
 import picpac
 import colorize_nets
 import _pic2pic
-from vgg19 import Vgg19
+from vgg19_bgr255 import Vgg19
 
 AB_BINS = 313
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-flags.DEFINE_string('db', 'ilsvrc2015.train', '')
+flags.DEFINE_string('db', 'enhance.train', '')
 flags.DEFINE_float('learning_rate', 0.02/100, 'initial learning rate.')
 flags.DEFINE_bool('decay', True, '')
 flags.DEFINE_float('decay_rate', 0.9, '')
@@ -53,39 +53,42 @@ flags.DEFINE_float('adversary_weight', 5e2, '')
 def p_relu (alpha=0.25):
     return lambda net: tf.nn.relu(net) - alpha * tf.nn.relu(-net)
 
-def generator (net, filters):
-    net = slim.conv2d(net, filters, 7, 1, activation_fn=p_relu())
-    # downscale
-    for _ in range(FLAGS.generator_downscale):
-        net = slim.conv2d(net, filters, 4, 2, activation_fn=p_relu())
-    # residual block
-    for _ in range(FLAGS.generator_blocks):
-        residual = slim.conv2d(net, filters, 3, 1, activation_fn=p_relu(alpha=0.1))
-        net = residual + net
-    # upscale
-    for _ in range(FLAGS.generator_upscale):
-		# I think subpixel convolution is just conv_transpose
-		# http://www.wdong.org/equivalence-of-subpixel-convolution-and-transposed-convolution.html
-        net = slim.conv2d_transpose(net, filters, 6, 2, activation_fn=p_relu())
-    net = slim.conv2d(net, 3, 7, 1, activation_fn=None)
+# lo-res -> hi-res
+def generator (net, filters, scope):
+    with tf.variable_scope(scope):
+        net = slim.conv2d(net, filters, 7, 1, activation_fn=p_relu())
+        # downscale
+        for _ in range(FLAGS.generator_downscale):
+            net = slim.conv2d(net, filters, 4, 2, activation_fn=p_relu())
+        # residual block
+        for _ in range(FLAGS.generator_blocks):
+            residual = slim.conv2d(net, filters, 3, 1, activation_fn=p_relu(alpha=0.1))
+            net = residual + net
+        # upscale
+        for _ in range(FLAGS.generator_upscale):
+            # I think subpixel convolution is just conv_transpose
+            # http://www.wdong.org/equivalence-of-subpixel-convolution-and-transposed-convolution.html
+            net = slim.conv2d_transpose(net, filters, 6, 2, activation_fn=p_relu())
+        net = slim.conv2d(net, 3, 7, 1, activation_fn=None)
     return net
 
 # returns two feature vectors, L and H
 # L is low-level perceptual feature
 # H is high-level discriminative feature, +1: real data; -1: generated data
-def feature_extractor (rgb):
+def feature_extractor (bgr255, scope):
     c = FLAGS.discriminator_size
-    vgg = Vgg19()
-    vgg.build(rgb/255)
-    disc1_1 = slim.conv2d(slim.batch_norm(vgg.conv1_2), c, 5, 2, activation_fn=p_relu())
-    disc1_2 = slim.conv2d(disc1_2, c, 5, 2)     # 1/4
-    disc2 = slim.conv2d(slim.batch_norm(vgg.conv2_2), 2*c, 5, 2, activation_fn=p_relu())    # 1/4
-    disc3 = slim.conv2d(slim.batch_norm(vgg.conv3_2), 3*c, 3, 1, activation_fn=p_relu())    # 1/4
-    net = tf.concat([disc1_2, disc2, disc3], axis=3)
-    net = slim.conv2d(net, 4*c, 1, 1, activation_fn=p_relu())
-    net = slim.conv2d(net, 3*c, 3, 2, activation_fn=p_relu())
-    net = slim.conv2d(net, 2*c, 1, 1, activation_fn=p_relu())
-    disc = slim.batch_norm(slim.conv2d(net, 1, 1, 1, activation_fn=None))
+    vgg = Vgg19()   # vgg net is not trainable
+    vgg.build(bgr255)
+    with tf.variable_scope(scope):
+        disc1_1 = slim.conv2d(slim.batch_norm(vgg.conv1_2), c, 5, 2, activation_fn=p_relu())
+        disc1_2 = slim.conv2d(disc1_2, c, 5, 2)     # 1/4
+        disc2 = slim.conv2d(slim.batch_norm(vgg.conv2_2), 2*c, 5, 2, activation_fn=p_relu())    # 1/4
+        disc3 = slim.conv2d(slim.batch_norm(vgg.conv3_2), 3*c, 3, 1, activation_fn=p_relu())    # 1/4
+        net = tf.concat([disc1_2, disc2, disc3], axis=3)
+        net = slim.conv2d(net, 4*c, 1, 1, activation_fn=p_relu())
+        net = slim.conv2d(net, 3*c, 3, 2, activation_fn=p_relu())
+        net = slim.conv2d(net, 2*c, 1, 1, activation_fn=p_relu())
+        disc = slim.batch_norm(slim.conv2d(net, 1, 1, 1, activation_fn=None))
     return vgg.conv2_2, net
 
 def softminus (x):
@@ -106,11 +109,11 @@ def build_graph (optimizer, global_step):
 
     X = tf.image.resize_images(Y, lo_size, name='lo_res')
 
-    G = tf.identify(generator(X, FLAGS.generator_filters), name='hi_res')
+    G = tf.identify(generator(X, FLAGS.generator_filters, 'G'), name='hi_res')
 
     # X and G need to go through the same feature extracting network
     # so we concatenate them first and then split the results
-    L, H = feature_extractor(tf.concat([Y, G], axis=0))
+    L, H = feature_extractor(tf.concat([Y, G], axis=0), 'D')
 
     L1, L2 = tf.split(0, 2, L)  # low-level feature,    2 is prediction
     H1, H2 = tf.split(0, 2, H)  # high-level feature,   2 is prediction
@@ -133,13 +136,15 @@ def build_graph (optimizer, global_step):
              loss_adversary * FLAGS.adversary_weight
 
     phases = []
+    var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "G")
     phase.append(('generate',
-                  optimizer.minimise(loss_G, global_step=global_step),
-                  [loss_perceptual, loss_smooth, loss_adversary],
+                  optimizer.minimise(loss_G, global_step=global_step, var_list=var_list),
+                  [loss_G, loss_perceptual, loss_smooth, loss_adversary],
                   [Y, G]))
 
+    var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "D")
     phase.append(('discriminate',
-                  optimizer.minimise(loss_discriminator, global_step=global_step),
+                  optimizer.minimise(loss_discriminator, global_step=global_step, var_list=var_list),
                   [loss_discriminator],
                   []))
 

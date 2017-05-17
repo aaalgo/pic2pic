@@ -127,6 +127,7 @@ def build_graph (optimizer, global_step):
         radius = FLAGS.blur * 3
         kernel = np.zeros((radius*2+1, radius*2+1), dtype=np.float32)
         kernel[radius, radius] = 1.0
+        #####!!!
         kernel = cv2.blur(kernel, (FLAGS.blur, FLAGS.blur))
         eye = np.eye(3)
 

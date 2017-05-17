@@ -11,14 +11,10 @@ import time
 import threading
 import subprocess
 import logging
-from tqdm import tqdm
 import numpy as np
 import tensorflow as tf
-import tensorflow.contrib.slim as slim
+from tensorflow.python.framework import meta_graph
 import cv2
-import picpac
-import colorize_nets
-from vgg19_bgr255 import Vgg19
 
 AB_BINS = 313
 
@@ -27,9 +23,10 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string('input', None, '')
 flags.DEFINE_string('output', None, '')
 flags.DEFINE_string('model', None, '')
+flags.DEFINE_integer('blur', 1, '')
 
 def main (_):
-    logging.basicConfig(level=FLAGS.verbose)
+    logging.basicConfig()
 
     X = tf.placeholder(tf.float32, shape=(None, None, None, 3))
     mg = meta_graph.read_meta_graph_file(FLAGS.model + '.meta')
@@ -45,6 +42,22 @@ def main (_):
     with tf.Session(config=sess_config) as sess:
         sess.run(init)
         saver.restore(sess, FLAGS.model)
+        cap = cv2.VideoCapture(FLAGS.input)
+
+        fourcc = cv2.cv.CV_FOURCC(*'XVID')
+        out = cv2.VideoWriter(FLAGS.output, fourcc, 25, (640*2, 360))
+        C = 0
+        while cap.isOpened():
+            print('%f' % (C/25,))
+            ret, frame = cap.read()
+            orig = frame.astype(np.float32)
+            ks = FLAGS.blur * 2 + 1
+            frame = cv2.GaussianBlur(orig, (ks, ks), FLAGS.blur)
+            frame = np.expand_dims(frame, 0)
+            frame, = sess.run([Y], feed_dict={X: frame})
+            both = np.concatenate((orig, frame[0]), axis=1)
+            out.write(both.astype(np.uint8))
+            C += 1
     pass
 
 if __name__ == '__main__':

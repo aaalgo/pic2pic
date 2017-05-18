@@ -104,6 +104,8 @@ def main (_):
     enc = queue.enqueue((L, AB, W))
     dec_L, dec_AB, dec_W = queue.dequeue()
     dec_L.set_shape(L.get_shape())
+    # we need to name this so as to map the variable for prediction
+    dec_L = tf.identity(dec_L, name='dec_L')
     dec_AB.set_shape(AB.get_shape())
     dec_W.set_shape(W.get_shape())
     tf.summary.image('input', X, max_outputs=5)

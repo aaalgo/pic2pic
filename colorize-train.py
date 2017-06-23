@@ -22,9 +22,10 @@ AB_BINS = 313
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-flags.DEFINE_string('db', 'ilsvrc2015.train', '')
+#flags.DEFINE_string('db', 'ilsvrc2015.train', '')
+flags.DEFINE_string('db', '/data/scratch/wdong/imagenet.db', '')
 flags.DEFINE_string('net', 'simple', '') 
-flags.DEFINE_float('learning_rate', 0.02/100, 'initial learning rate.')
+flags.DEFINE_float('learning_rate', 0.01/100, 'initial learning rate.')
 flags.DEFINE_bool('decay', True, '')
 flags.DEFINE_float('decay_rate', 0.95, '')
 flags.DEFINE_float('decay_steps', 10000, '')
@@ -33,7 +34,7 @@ flags.DEFINE_string('log', 'log', '')
 flags.DEFINE_string('resume', None, '')
 
 flags.DEFINE_integer('batch', 48, '')
-flags.DEFINE_integer('max_steps', 400000, '')
+flags.DEFINE_integer('max_steps', 800000, '')
 flags.DEFINE_integer('epoch_steps', 200, '')
 flags.DEFINE_integer('ckpt_epochs', 20, '')
 flags.DEFINE_integer('verbose', logging.INFO, '')
@@ -149,13 +150,13 @@ def main (_):
                 round_div=stride,
                 channels=3,
                 stratify=False,
-                pert_min_scale=1, #0.92,
+                pert_min_scale=0.97, #0.92,
                 pert_max_scale=1.5,
                 channel_first=False # this is tensorflow specific
                                     # Caffe's dimension order is different.
                 )
 
-    stream = picpac.ImageStream(FLAGS.db, perturb=False, loop=True, **picpac_config)
+    stream = picpac.ImageStream(FLAGS.db, perturb=True, loop=True, **picpac_config)
 
     sess_config = tf.ConfigProto()
 
@@ -192,7 +193,7 @@ def main (_):
                     x = decode_lab(l, ab)
                     ab_p, = sess.run([prob], feed_dict={dec_L: l, dec_AB: ab, dec_W: w})
                     y = decode_lab(l, ab_p)
-                    _, m, s = sess.run([train_op, metrics, summaries], feed_dict={dec_L: l, dec_AB: ab, X: x, Y: y})
+                    _, m, s = sess.run([train_op, metrics, summaries], feed_dict={dec_L: l, dec_AB: ab, dec_W:w, X: x, Y: y})
                     log.add_summary(s, step)
                 else:
                     _, m = sess.run([train_op, metrics])

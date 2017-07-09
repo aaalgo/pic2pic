@@ -31,7 +31,7 @@ flags.DEFINE_string('model', 'model', '')
 flags.DEFINE_string('log', 'log', '')
 flags.DEFINE_string('resume', None, '')
 
-flags.DEFINE_integer('batch', 32, '')
+flags.DEFINE_integer('batch', 64, '')
 flags.DEFINE_integer('max_steps', 80000000, '')
 flags.DEFINE_integer('epoch_steps', 200, '')
 flags.DEFINE_integer('ckpt_epochs', 20, '')
@@ -89,6 +89,7 @@ def generator (net, scope='G'):
         net = slim.conv2d(net, 256, 3, 1)
         net = slim.conv2d(net, 256, 3, 1)
         net = slim.conv2d(net, 3, 1, 1, activation_fn=None, normalizer_fn=None)
+        net = tf.clip_by_value(net, 0, 255)
         # 1/4 size
     # net, stride, down-size
     return net, 8, 4
@@ -149,8 +150,8 @@ def main (_):
     #tf.summary.image('low_res', BGR2RGB(X), max_outputs=3)
     #tf.summary.image('hi_res', BGR2RGB(Y), max_outputs=3)
     #tf.summary.image('predict', BGR2RGB(G), max_outputs=3)
-    tf.summary.image('input', GTCOLOR, max_outputs=5)
-    tf.summary.image('output', COLOR, max_outputs=5)
+    tf.summary.image('input', BGR2RGB(GTCOLOR), max_outputs=5)
+    tf.summary.image('output', BGR2RGB(COLOR), max_outputs=5)
 
 
     # X and G need to go through the same feature extracting network
@@ -275,8 +276,22 @@ def main (_):
                 step += 1
                 pass
             images, _, _ = stream.next()
-            gray, color, w = _pic2pic.encode_bgr(images, downsize)
-            s, = sess.run([summaries], feed_dict={GRAY: gray, GTCOLOR: color})
+            images = images[:5, :, :, :]
+            gray, gtcolor, _ = _pic2pic.encode_bgr(images, downsize)
+            color = sess.run(COLOR, feed_dict={GRAY: gray})
+            full = np.zeros(images.shape, dtype=np.float32)
+            _, H, W, _ = images.shape
+            color /= 255.0
+            gray /= 255.0
+            for i in range(images.shape[0]):
+                lab = cv2.cvtColor(cv2.cvtColor(gray[i], cv2.COLOR_GRAY2BGR), cv2.COLOR_BGR2LAB)
+                full[i, :, :, :1] = lab[:, :, :1]
+                one = cv2.resize(color[i], (W, H))
+                lab = cv2.cvtColor(one, cv2.COLOR_BGR2LAB)
+                full[i, :, :, 1:] = lab[:, :, 1:]
+                cv2.cvtColor(full[i], cv2.COLOR_LAB2BGR, full[i])
+                pass
+            s, = sess.run([summaries], feed_dict={COLOR: full, GTCOLOR: images})
             log.add_summary(s, step)
             avg /= FLAGS.epoch_steps
             stop_time = time.time()
